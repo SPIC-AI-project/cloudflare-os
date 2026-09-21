@@ -78,6 +78,8 @@ function withChatApi(
   }
 }
 
+const onReviewActions = vi.fn<(gatekeeperId?: number) => void>()
+
 function renderChat(overseer: RpcStub<Overseer>, selectedChatId: number | null = null) {
   return testRoot.render(
     <ChatInterface
@@ -90,6 +92,7 @@ function renderChat(overseer: RpcStub<Overseer>, selectedChatId: number | null =
       consoleLogSeverity="info"
       onConsumeConsoleLogs={() => ''}
       onDiscardConsoleLogs={() => {}}
+      onReviewActions={onReviewActions}
       onOpenGadget={() => {}}
       outputOfWorkpiece={() => undefined}
     />,
@@ -226,32 +229,21 @@ describe('ChatInterface action failure note', () => {
   })
 })
 
-// A pending card a rule would actually apply: gatekeeper-bound, tagged, auto-approvable.
-const ruleEligible = {
-  gatekeeperId: 1,
-  description: {
-    title: 'Action 1',
-    description: '',
-    implementsRevert: false,
-    actionKind: { tag: 'edit', label: 'Edits' },
-    autoApprovable: true,
-  },
-}
+describe('ChatInterface pending action card', () => {
+  it('sends the reviewer to the action’s own connection instead of deciding here', async () => {
+    await renderCard({ gatekeeperId: 4, description: { title: 'Action 1', description: '', implementsRevert: false, awaitDecision: true } })
 
-describe('ChatInterface always-approve offer', () => {
-  it('offers it on a card a rule would apply', async () => {
-    await renderCard(ruleEligible)
-
-    expect(document.body.textContent).toContain('Always approve')
-  })
-
-  it('withholds it once the card carries a failure', async () => {
-    await renderCard({ ...ruleEligible, failure: 'page was deleted upstream' })
-
-    // A stop disqualifies the action from the rule path, so enabling one here would promise an
-    // application that never happens and leave an awaiting agent turn suspended.
-    expect(document.body.textContent).toContain('page was deleted upstream')
+    const button = [...document.querySelectorAll('button')]
+      .find(node => node.textContent === 'Review actions')
+    expect(button).toBeDefined()
+    expect(document.body.textContent).not.toContain('Approve')
     expect(document.body.textContent).not.toContain('Always approve')
+
+    act(() => button!.click())
+
+    // Opening the review decides nothing: the card stays pending until the server says otherwise.
+    expect(onReviewActions).toHaveBeenCalledWith(4)
+    expect(document.body.textContent).toContain('Review actions')
   })
 })
 

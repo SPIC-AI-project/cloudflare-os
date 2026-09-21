@@ -2,9 +2,8 @@ import { useState } from 'react'
 import { Popover } from '@cloudflare/kumo'
 import { ArrowRight, Pulse } from '@phosphor-icons/react'
 import type { RpcStub } from 'capnweb'
-import type { Overseer } from '@gadgets/workshop-shared/api'
+import type { Overseer, WorkpieceId } from '@gadgets/workshop-shared/api'
 import { CountBadge } from './components/CountBadge'
-import { ResolveButton } from './components/ResolveButton'
 import {
   formatRelativeTime,
   PENDING_CHECKING_COPY,
@@ -12,11 +11,10 @@ import {
   type ActivityView,
 } from './Activity'
 import { useActions } from './useActions'
-import { useResolveAction } from './useResolveAction'
 
 interface ActivityNotificationsProps {
   overseer: RpcStub<Overseer>
-  onViewActivity: (view: ActivityView) => void
+  onViewActivity: (view: ActivityView, gatekeeperId?: WorkpieceId) => void
 }
 
 const PREVIEW_LIMIT = 3
@@ -26,13 +24,11 @@ export default function ActivityNotifications({
   onViewActivity,
 }: ActivityNotificationsProps) {
   const [open, setOpen] = useState(false)
-  const [processing, setProcessing] = useState<Set<number>>(new Set())
-  const resolveAction = useResolveAction(overseer, setProcessing)
   const { status, pending } = useActions(overseer)
 
-  const openFullView = (view: ActivityView) => {
+  const openFullView = (view: ActivityView, gatekeeperId?: WorkpieceId) => {
     setOpen(false)
-    onViewActivity(view)
+    onViewActivity(view, gatekeeperId)
   }
 
   return (
@@ -76,47 +72,26 @@ export default function ActivityNotifications({
           </p>
         ) : (
           <div className="max-h-[min(58vh,420px)] overflow-y-auto pb-1">
-            {pending.slice(0, PREVIEW_LIMIT).map((action, index) => {
-              const isProcessing = processing.has(action.id)
-              return (
-                <div
-                  key={action.id}
-                  className={`px-3.5 py-2.5 ${index === 0 ? '' : 'border-t border-kumo-line'}`}
-                >
-                  <div className="flex items-start gap-2">
-                    <button
-                      type="button"
-                      onClick={() => openFullView('review')}
-                      className="min-w-[7rem] flex-1 cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-ring"
-                    >
-                      <span className="block truncate text-[13px] font-medium leading-[18px] tracking-[-0.25px] text-kumo-default">
-                        {action.description.title}
-                      </span>
-                      <span className="mt-0.5 block truncate text-[11.5px] leading-4 tracking-[-0.1px] text-kumo-inactive">
-                        {action.resourceTitle}
-                        <span className="px-1">·</span>
-                        {formatRelativeTime(action.createdAt)}
-                      </span>
-                      <span className="mt-1.5 block line-clamp-2 text-[12.5px] leading-[18px] tracking-[-0.2px] text-kumo-subtle">
-                        {action.description.description}
-                      </span>
-                    </button>
-                    <div className="ml-auto flex flex-shrink-0 items-center gap-0.5">
-                      <ResolveButton
-                        tone="deny"
-                        disabled={isProcessing}
-                        onClick={() => void resolveAction(action.id, 'deny')}
-                      />
-                      <ResolveButton
-                        tone="approve"
-                        disabled={isProcessing}
-                        onClick={() => void resolveAction(action.id, 'approve')}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
+            {pending.slice(0, PREVIEW_LIMIT).map((action, index) => (
+              <button
+                key={action.id}
+                type="button"
+                onClick={() => openFullView('review', action.gatekeeperId)}
+                className={`block w-full cursor-pointer px-3.5 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-kumo-ring ${index === 0 ? '' : 'border-t border-kumo-line'}`}
+              >
+                <span className="block truncate text-[13px] font-medium leading-[18px] tracking-[-0.25px] text-kumo-default">
+                  {action.description.title}
+                </span>
+                <span className="mt-0.5 block truncate text-[11.5px] leading-4 tracking-[-0.1px] text-kumo-inactive">
+                  {action.resourceTitle}
+                  <span className="px-1">·</span>
+                  {formatRelativeTime(action.createdAt)}
+                </span>
+                <span className="mt-1.5 block line-clamp-2 text-[12.5px] leading-[18px] tracking-[-0.2px] text-kumo-subtle">
+                  {action.description.description}
+                </span>
+              </button>
+            ))}
           </div>
         )}
 
@@ -126,11 +101,7 @@ export default function ActivityNotifications({
             onClick={() => openFullView(pending.length > 0 ? 'review' : 'history')}
             className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[13px] leading-[18px] tracking-[-0.25px] text-kumo-default transition-colors hover:bg-kumo-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-kumo-ring"
           >
-            <span>
-              {pending.length > PREVIEW_LIMIT
-                ? `View all ${pending.length} requests`
-                : 'View all activity'}
-            </span>
+            <span>{pending.length > 0 ? 'Review actions' : 'View all activity'}</span>
             <ArrowRight size={13} className="text-kumo-inactive" />
           </button>
         </div>

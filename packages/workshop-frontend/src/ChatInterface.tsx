@@ -87,7 +87,6 @@ import {
 } from "@gadgets/workshop-shared/api";
 import { composeCodeChange, type CodeChange } from "@gadgets/workshop-shared/code-change";
 import type { ChatChangeRow } from "./features/code/otClient";
-import { ActionKind } from "@gadgets/workshop-shared/gatekeeper";
 import {
   useSlashCommandChoice, type OverseerSource,
 } from "./components/chat/slash-command-catalog";
@@ -98,12 +97,8 @@ import { formatOf, FORMAT_ICONS } from "./components/format/formats";
 import { FormatMiniature } from "./components/format/FormatVisuals";
 import { HookToggle } from "./components/HookToggle";
 import DeleteConfirmationDialog from "./components/DeleteConfirmationDialog";
-import AutoApproveConfirmDialog from "./components/AutoApproveConfirmDialog";
-import { AlwaysApproveButton, ResolveButton } from "./components/ResolveButton";
 import { WorkshopButton, WorkshopIconButton, WorkshopInput } from "./components/WorkshopControls";
 import { actionLogResumed, useActionEntries } from "./useActions";
-import { useAlwaysApproveTag } from "./useAlwaysApproveTag";
-import { useResolveAction } from "./useResolveAction";
 import { safeExternalUrl } from "./utils/safeExternalUrl";
 import { useAuthenticatedApi } from "./AuthContext";
 import { useVendorBranding } from "./useVendorBranding";
@@ -2447,9 +2442,8 @@ interface ChatInterfaceProps {
   onDiscardConsoleLogs: () => void;
   onChatCountChange?: (count: number, hasChatZero: boolean) => void;
   onAgentActiveChange?: (chatId: number, isActive: boolean) => void;
-  // Called after an auto-approval rule is enabled from the chat thread, so the Activity pane's
-  // Auto-approval list reflects it without a reload.
-  onAutoApproveChange?: () => void;
+  // Opens the Activity review focused on this connection's batch; chat itself decides nothing.
+  onReviewActions: (gatekeeperId?: WorkpieceId) => void;
   sidebarMode?: boolean;
   sidebarWidth?: number;
   onSidebarResize?: (width: number) => void;
@@ -2642,7 +2636,7 @@ function ChatInterface({
   onDiscardConsoleLogs,
   onChatCountChange,
   onAgentActiveChange,
-  onAutoApproveChange,
+  onReviewActions,
   sidebarMode,
   sidebarWidth = 280,
   onSidebarResize,
@@ -4256,35 +4250,6 @@ function ChatInterface({
     return changed;
   };
 
-  const applyOptimisticActionState = (actionId: number, state: "approved" | "rejected"): boolean => {
-    let changed = false;
-    const locations = cacheRef.current.actionMessages.get(actionId);
-    if (!locations) return false;
-
-    for (const [key, location] of locations) {
-      const cached = getCachedActionMessage(location);
-      if (!cached || cached.msg.actionId !== actionId || !cached.msg.actionLog) {
-        locations.delete(key);
-        continue;
-      }
-
-      const nextMessages = [...cached.messages];
-      const log = cached.msg.actionLog;
-      nextMessages[location.sequence] = {
-        ...cached.msg,
-        // Approval clears the recorded failure, as the server does; a rejection retains it.
-        actionLog: log.type === "action" && state === "approved"
-            ? { ...log, state, appliedAt: new Date(), failure: undefined }
-            : { ...log, state, appliedAt: new Date() },
-      };
-      cacheRef.current.messages.set(location.chatId, nextMessages);
-      changed = true;
-    }
-
-    if (locations.size === 0) cacheRef.current.actionMessages.delete(actionId);
-    return changed;
-  };
-
   const applyOptimisticHookEnabled = (actionId: number, enabled: boolean): boolean => {
     let changed = false;
     const locations = cacheRef.current.actionMessages.get(actionId);
@@ -4327,22 +4292,6 @@ function ChatInterface({
       });
     }
   }, [overseer, selectedChatId, toasts]);
-
-  // Pending "always approve this type" confirmation, opened from a pending action card.
-  const [autoApproveConfirm, setAutoApproveConfirm] = useState<
-    { actionId: number; gatekeeperId: number; resourceTitle: string;
-      actionKind: ActionKind; actionLabel: string } | null
-  >(null);
-
-  // Enable auto-approval of an action tag on its connection (gated by the confirm dialog). The
-  // server applies the now-eligible pending action(s) in an apply pass, and the state flips to
-  // "approved" through the actions subscription -- so we don't optimistically mutate it here.
-  const { alwaysApproveTag, isTagAutoApproved } =
-    useAlwaysApproveTag(overseer, setProcessingActions, onAutoApproveChange);
-
-  const resolveAction = useResolveAction(overseer, setProcessingActions, (actionId, state) => {
-    if (applyOptimisticActionState(actionId, state)) forceUpdate();
-  });
 
   // Handle enabling/disabling a bound hook from the chat thread.
   const handleToggleHook = async (actionId: number, hookId: number, enabled: boolean) => {
@@ -4924,48 +4873,15 @@ function ChatInterface({
     const stateLabelCls = isRejected
       ? "text-kumo-danger"
       : "text-kumo-inactive";
-    // Auto-approval target: offer "Always approve this type" only when enabling a rule would
-    // actually apply this action -- a tagged action on a connection that the gatekeeper marked
-    // auto-approvable, whose last attempt did not stop. (A non-auto-approvable action stays a
-    // manual gate even with a rule; a stopped one needs an explicit retry; an auto-approvable
-    // action with an existing rule wouldn't still be pending.)
-    const autoApproveTarget =
-      log.gatekeeperId !== undefined && log.description.actionKind !== undefined &&
-      log.description.autoApprovable === true && log.failure === undefined
-        ? {
-            actionId: msg.actionId,
-            gatekeeperId: log.gatekeeperId,
-            resourceTitle: log.resourceTitle,
-            actionKind: log.description.actionKind,
-            actionLabel: log.description.title,
-          }
-        : undefined;
-
+    // Decisions live in Activity, where the whole connection's batch is reviewed and applied
+    // together; the card only navigates there, pre-focused on this action's connection.
     const actionControls = isPending ? (
-      <>
-        {autoApproveTarget &&
-          !isTagAutoApproved(autoApproveTarget.gatekeeperId, autoApproveTarget.actionKind.tag) && (
-          <Tooltip content="Always approve this type of action on this connection, without future prompts." asChild>
-            <span className="flex">
-              <AlwaysApproveButton
-                onClick={() => setAutoApproveConfirm(autoApproveTarget)}
-                disabled={isProc}
-              />
-            </span>
-          </Tooltip>
-        )}
-        <ResolveButton
-          tone="deny"
-          onClick={() => void resolveAction(msg.actionId, "deny")}
-          disabled={isProc}
-        />
-        <ResolveButton
-          tone="approve"
-          variant={isBlocking ? "filled" : "quiet"}
-          onClick={() => void resolveAction(msg.actionId, "approve")}
-          disabled={isProc}
-        />
-      </>
+      <WorkshopButton
+        tone={isBlocking ? "primary" : "secondary"}
+        onClick={() => onReviewActions(log.gatekeeperId)}
+      >
+        Review actions
+      </WorkshopButton>
     ) : null;
 
     // Resource label, shown at the top of the blocking callout and at the bottom of the subtle
@@ -5014,6 +4930,9 @@ function ChatInterface({
                   <MarkdownMessage message={log.description.description} />
                 </div>
                 {log.failure && <ActionFailureNote failure={log.failure} />}
+                <p className="m-0 mt-1.5 text-[12px] leading-4 text-kumo-subtle">
+                  This turn stays paused until you apply this connection&apos;s batch in Activity.
+                </p>
               </div>
               <div className="ml-3 flex flex-shrink-0 items-center gap-1 self-center">
                 {actionControls}
@@ -6304,7 +6223,7 @@ function ChatInterface({
                       hasPendingConnectionRequest
                         ? "Set up or deny the connection request above to continue."
                         : hasPendingAwaitedAction
-                          ? "Approve or reject the pending action above to continue."
+                          ? "Review the pending action above and apply its batch to continue."
                           : undefined
                     }
                     draftUpdateBanner={(() => {
@@ -6447,24 +6366,6 @@ function ChatInterface({
         }}
         onConfirm={handleDeleteConfirm}
       />
-
-      {autoApproveConfirm && (
-        <AutoApproveConfirmDialog
-          open
-          actionLabel={autoApproveConfirm.actionLabel}
-          resourceTitle={autoApproveConfirm.resourceTitle}
-          isProcessing={processingActions.has(autoApproveConfirm.actionId)}
-          onOpenChange={(open) => {
-            if (!open) setAutoApproveConfirm(null);
-          }}
-          onConfirm={async () => {
-            const { actionId, gatekeeperId, actionKind } = autoApproveConfirm;
-            if (await alwaysApproveTag(actionId, gatekeeperId, actionKind)) {
-              setAutoApproveConfirm(null);
-            }
-          }}
-        />
-      )}
 
       {/* Accept flow for an agent connection request: pre-seeds the gatekeeper modal and, on
           creation, finalizes the request so the agent resumes. */}
