@@ -66,7 +66,10 @@ function buildOptions(gatewayMode: boolean, enabledProviders: Set<string> | null
   const providerOrder = Object.keys(SUGGESTED_MODELS) as AiModelProvider[]
 
   for (const provider of providerOrder) {
-    if (enabledProviders && !enabledProviders.has(provider)) continue
+    // SPIC fork: Ollama is never gateway-managed (see getModel()'s "SPIC fork" comment), so it
+    // isn't subject to the deployment's AI Gateway provider allowlist either -- otherwise it
+    // silently disappears from this list the moment gateway mode is on.
+    if (enabledProviders && provider !== 'ollama' && !enabledProviders.has(provider)) continue
 
     // In gateway mode, suggested models are already built-in, so don't list them.
     if (!gatewayMode) {
