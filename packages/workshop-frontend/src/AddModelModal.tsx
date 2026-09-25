@@ -161,7 +161,9 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
 
     const isOllama = selection?.provider === 'ollama'
     const isCloudflare = selection?.provider === 'cloudflare'
-    const showCredentials = !gatewayMode
+    // SPIC fork: Ollama has no AI Gateway route, so it stays configured per-user with its own
+    // URL even on a deployment that otherwise routes everyone through a shared gateway.
+    const showCredentials = !gatewayMode || isOllama
 
     if (showCredentials && selection && !isOllama && !apiToken.trim()) {
       newErrors.apiToken = 'Please enter your API token'
@@ -194,12 +196,14 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
         name: finalDisplayName,
       }
 
+      // SPIC fork: same Ollama carve-out as `validate()` above.
+      const isOllama = selection!.provider === 'ollama'
       const config: AiModelConfig = {
         provider: selection!.provider,
         model: finalModelId,
-        apiToken: gatewayMode ? '' : apiToken.trim(),
-        ...(!gatewayMode && accountId.trim() && { accountId: accountId.trim() }),
-        ...(!gatewayMode && apiUrl.trim() && { apiUrl: apiUrl.trim() }),
+        apiToken: (gatewayMode && !isOllama) ? '' : apiToken.trim(),
+        ...((!gatewayMode || isOllama) && accountId.trim() && { accountId: accountId.trim() }),
+        ...((!gatewayMode || isOllama) && apiUrl.trim() && { apiUrl: apiUrl.trim() }),
       }
 
       await authenticatedApi.addModel(profile, config)
@@ -218,7 +222,8 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
   const example = selection ? exampleModel(selection.provider) : null
   const isOllama = selection?.provider === 'ollama'
   const isCloudflare = selection?.provider === 'cloudflare'
-  const showCredentials = !gatewayMode
+  // SPIC fork: same Ollama carve-out as `validate()` above.
+  const showCredentials = !gatewayMode || isOllama
 
   // Group options by provider for rendering with visual separators.
   const groupedOptions: { provider: string; items: typeof options }[] = []

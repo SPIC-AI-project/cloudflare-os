@@ -356,6 +356,14 @@ function makeHandle(args: HandleArgs): ModelHandle {
 export function getModel(env: Cloudflare.Env, config: AiModelConfig,
                          initiator: AiChatAuthorInfo,
                          options: ModelRoutingOptions = {}): ModelHandle {
+  // SPIC fork: Ollama has no AI Gateway-native route (gatewayNativeModel has no "ollama" case,
+  // and AI Gateway doesn't proxy to an arbitrary local host), so a local Ollama server can only
+  // ever be reached directly -- regardless of gateway mode, so it stays usable per-user even on
+  // a deployment that otherwise routes everyone else through a shared AI Gateway.
+  if (config.provider === "ollama") {
+    return getModelDirect(config, options.sessionAffinity);
+  }
+
   // BYOK: a connected user's own Cloudflare account pays for everything (all providers, including
   // Workers AI), routed through the user's own AI Gateway with unified billing. Honored regardless
   // of whether a platform AI Gateway is configured, so connected users are always billed correctly.
