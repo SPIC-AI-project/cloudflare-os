@@ -548,8 +548,11 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   async addModel(profile: AiChatAuthorInfo, config: AiModelConfig): Promise<void> {
+    // SPIC fork: Ollama never rides AI Gateway (see ai-models.ts's "SPIC fork" comment), so it's
+    // exempt from the gateway provider allowlist here too -- otherwise this throws before the
+    // model can ever be saved, regardless of how getModel()/the frontend already handle it.
     let gwConfig = getAiGatewayConfig(this.env);
-    if (gwConfig && !gwConfig.providers.has(config.provider)) {
+    if (gwConfig && config.provider !== "ollama" && !gwConfig.providers.has(config.provider)) {
       throw new Error(`Provider "${config.provider}" is not available in AI Gateway mode.`);
     }
 
