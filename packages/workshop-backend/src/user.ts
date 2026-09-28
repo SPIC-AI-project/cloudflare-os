@@ -7,6 +7,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { createTypedStorage, collection } from "@gadgets/typed-storage";
 import { createWorkshopLogger } from "./observability";
 import { getAiGatewayConfig } from "./ai-gateway.js";
+import { getSharedOllamaConfig } from "./spic-ollama-shared.js";
 import { utcDayKey, nextUtcMidnightIso, DailyQuotaResult } from "./ai-gateway-billing/limits/config.js";
 import type { AdminSettings } from "./admin-settings.js";
 import { isReservedBlueprintKey, readBlueprintKvRecord } from "./blueprint-archive.js";
@@ -538,6 +539,15 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
       }
     }
 
+    // SPIC fork: same idea, for the company-wide Ollama server (see spic-ollama-shared.ts).
+    let sharedOllama = getSharedOllamaConfig(this.env);
+    if (sharedOllama) {
+      for (let entry of sharedOllama.getModelList()) {
+        result.push(entry);
+        gwModelIds.add(entry.id);
+      }
+    }
+
     // Also include user-configured models, skipping any that duplicate a gateway model.
     for (let model of this.storage.aiModels.list()) {
       if (!gwModelIds.has(model.profile.id)) {
@@ -570,6 +580,11 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
         }
       }
     }
+    // SPIC fork: same idea, for the company-wide Ollama server (see spic-ollama-shared.ts).
+    let sharedOllamaModel = getSharedOllamaConfig(this.env)?.resolveModel(id);
+    if (sharedOllamaModel) {
+      throw new Error(`Cannot delete built-in model "${sharedOllamaModel.profile.name}".`);
+    }
 
     this.storage.aiModels.delete(id);
   }
@@ -595,7 +610,8 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     if (id !== null) {
       // Validate that the model exists in the user's configured models or as a gateway model.
       let gwConfig = getAiGatewayConfig(this.env);
-      let exists = !!this.storage.aiModels.get(id) || !!gwConfig?.resolveModel(id);
+      let exists = !!this.storage.aiModels.get(id) || !!gwConfig?.resolveModel(id) ||
+          !!getSharedOllamaConfig(this.env)?.resolveModel(id);
       if (!exists) {
         throw new Error(`No such model: ${id}`);
       }
@@ -705,6 +721,10 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
       // In AI Gateway mode, resolve gateway models first.
       if (gwConfig) {
         result.aiModel = gwConfig.resolveModel(modelId);
+      }
+      // SPIC fork: same idea, for the company-wide Ollama server (see spic-ollama-shared.ts).
+      if (!result.aiModel) {
+        result.aiModel = getSharedOllamaConfig(this.env)?.resolveModel(modelId);
       }
       if (!result.aiModel) {
         result.aiModel = this.storage.aiModels.get(modelId);

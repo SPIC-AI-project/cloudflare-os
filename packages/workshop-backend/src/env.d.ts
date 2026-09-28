@@ -24,6 +24,13 @@ declare global {
       // Note: outside gateway mode, Workers AI (provider "cloudflare") is BYOK like every other
       // provider -- the account ID and API token live in the user's model config, not in env.
 
+      // SPIC fork: a company-wide Ollama server, offered to every user the same way AI-Gateway
+      // providers are (see spic-ollama-shared.ts). OLLAMA_SHARED_API_TOKEN is a secret; the other
+      // two are plain vars (a URL and a JSON model catalog, neither sensitive).
+      OLLAMA_SHARED_API_URL?: string;
+      OLLAMA_SHARED_API_TOKEN?: string;
+      OLLAMA_SHARED_MODELS?: string;  // JSON: [{ "id": "muse-glimmer:latest", "name": "Muse Glimmer" }]
+
       // Blueprint storage bindings.
       BLUEPRINTS: KVNamespace;             // Workers KV for blueprint metadata lookup
       BLUEPRINT_CONTENT: R2Bucket;         // R2 bucket for blueprint code snapshots
