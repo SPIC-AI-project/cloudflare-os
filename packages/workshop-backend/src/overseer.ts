@@ -2653,10 +2653,13 @@ class OverseerImpl implements AgentHooks {
 
   getGatekeeperFacet(id: number): Fetcher<Gatekeeper<any>> {
     return this.ctx.facets.get(`gatekeeper${id}`, async () => {
+      console.log(`[debug] getGatekeeperFacet factory running for id=${id}`);
       let cls = this.storage.gatekeepers.get(id)?.class;
       if (!cls) {
+        console.error(`[debug] no gatekeeper class stored for id=${id}`);
         throw new Error("no such gatekeeper?");
       }
+      console.log(`[debug] gatekeeper class found for id=${id}`);
       return {class: cls};
     });
   }
@@ -2672,8 +2675,15 @@ class OverseerImpl implements AgentHooks {
   // was applied automatically. For an auto-approval, `resolvedBy` is the user who enabled the rule.
   async applyPendingAction(record: ActionRecord & {type: "action"},
                            resolvedBy: AiChatAuthorInfo, autoApproved: boolean): Promise<void> {
+    console.log(`[debug] applyPendingAction gatekeeperId=${record.gatekeeperId} action=${record.action}`);
     let gatekeeper = this.getGatekeeperFacet(record.gatekeeperId);
-    await gatekeeper.applyAction(record.action);
+    try {
+      await gatekeeper.applyAction(record.action);
+    } catch (err) {
+      console.error(`[debug] gatekeeper.applyAction threw`, err);
+      throw err;
+    }
+    console.log(`[debug] gatekeeper.applyAction succeeded`);
     record.state = "approved";
     record.appliedAt = new Date();
     record.resolvedBy = resolvedBy;
