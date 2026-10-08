@@ -1038,7 +1038,8 @@ class OverseerImpl implements AgentHooks {
     }
 
     await this.#runAgentTurn(
-        record.chatId, aiModel, record.initiator, record.callbackInitiated, liveChat);
+        record.chatId, aiModel, record.initiator, record.initiatorUserId, record.callbackInitiated,
+        liveChat);
   }
 
   // The hand-off once a chat's turn is over and its running-agent state has been torn down: drop
@@ -6501,12 +6502,14 @@ class OverseerImpl implements AgentHooks {
     });
 
     let liveChat = this.#getLiveChat(chatId);
-    let turn = this.#runAgentTurn(chatId, aiModel, initiator, callbackInitiated, liveChat);
+    let turn = this.#runAgentTurn(
+        chatId, aiModel, initiator, initiatorUserId, callbackInitiated, liveChat);
     if (keepAlive) this.ctx.waitUntil(turn);
   }
 
   #runAgentTurn(chatId: number, aiModel: UserAiModelRecord,
                 initiator: AiChatAuthorInfo,
+                initiatorUserId: string,
                 callbackInitiated: boolean,
                 liveChat: LiveChatContext): Promise<void> {
     return obsContext.with({
@@ -6515,17 +6518,19 @@ class OverseerImpl implements AgentHooks {
       chatId,
       modelId: aiModel.profile.id,
     }, () => this.#runAgentTurnWithContext(
-        chatId, aiModel, initiator, callbackInitiated, liveChat));
+        chatId, aiModel, initiator, initiatorUserId, callbackInitiated, liveChat));
   }
 
   async #runAgentTurnWithContext(chatId: number, aiModel: UserAiModelRecord,
                                  initiator: AiChatAuthorInfo,
+                                 initiatorUserId: string,
                                  callbackInitiated: boolean,
                                  liveChat: LiveChatContext): Promise<void> {
     // When this turn is billed to the user's own Cloudflare account, we refresh their cached credit
     // balance once the turn completes (see the `finally` below) so the next billing decision
     // reflects the spend this turn just incurred, rather than waiting for the cache TTL to lapse.
     let byokOwnerStub: DurableObjectStub<UserDurableObject> | undefined;
+    let finished = false;
     let startedAt = Date.now();
     const turnLogger = this.logger.with({
       operation: "agent.run",
@@ -6597,6 +6602,7 @@ class OverseerImpl implements AgentHooks {
 
         await runAgent(
             this, chosenModel, chatId, aiModel.profile, controller.signal, initiator, aiModel.config);
+        finished = true;
         turnLogger.debug("agent run finished", {
           event: "agent.run.finished", outcome: "ok",
           durationMs: Date.now() - startedAt,
@@ -6667,6 +6673,27 @@ class OverseerImpl implements AgentHooks {
       // stale records of this agent linger. If pending calls below restart the agent, it'll
       // re-register everything consistently.
       this.#unregisterRunningAgent(chatId);
+
+      if (finished && meta) {
+        // Classified here, past the turn's last await, so a decision made as it ended counts.
+        let awaitingDecision = this.#awaitsDecision(chatId);
+        // Only a person waits on their own turn, including one their approval resumed: callbacks
+        // and spawned agents finish unattended.
+        if (awaitingDecision || initiator.type === "user") {
+          this.ctx.waitUntil(this.users.get(this.users.idFromString(initiatorUserId))
+              .publishNotification({
+                id: crypto.randomUUID(),
+                kind: awaitingDecision ? "permissionRequested" : "taskCompleted",
+                workspaceId: this.ctx.id.toString(),
+                chatId,
+                chatTitle: meta.title,
+              }).catch(error => {
+                turnLogger.warn("notification publish failed", {
+                  event: "notification.publish.failed", error,
+                });
+              }));
+        }
+      }
 
       this.#finishAgentTurn(chatId);
     }
@@ -8254,6 +8281,26 @@ class OverseerImpl implements AgentHooks {
       });
     }
     return result;
+  }
+
+  // Whether the chat's current turn waits on the user's decision on a connection or action. Scans
+  // back to whatever started the turn, as #maybeResumeAfterActionDecision does.
+  #awaitsDecision(chatId: number): boolean {
+    for (let msg of this.storage.chats.list({prefix: chatKeyPrefix(chatId), reverse: true})) {
+      if (msg.type === "agentCallback") return false;
+      if (msg.type === "message" && (msg.author.type === "user" || msg.author.type === "gadget")) {
+        return false;
+      }
+      if (msg.type === "connectionRequest" && msg.state === "pending") return true;
+      if (msg.type === "action") {
+        let record = this.storage.actions.get(msg.actionId);
+        if (record?.type === "action" && record.caller.from === "agent" &&
+            record.description.awaitDecision && record.state === "pending") {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   // --- Connection-request hooks ---
