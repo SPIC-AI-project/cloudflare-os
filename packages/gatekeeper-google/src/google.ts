@@ -107,7 +107,7 @@ import {
   type GoogleOAuthEnv,
 } from "./oauth";
 import {
-  DOCS_TYPES_MODULE_PREFIX, DRIVE_TYPES_MODULE_PREFIX, stripTypeModulePrefix,
+  DOCS_TYPES_MODULE_PREFIX, DRIVE_TYPES_MODULE_PREFIX, GMAIL_TYPES_MODULE_PREFIX, stripTypeModulePrefix,
 } from "./type-bundle";
 
 let googleDocTypesCode: string | undefined;
@@ -139,7 +139,8 @@ import type {GoogleChatGatekeeperImplProps} from "./chat";
 export { GmailGatekeeperImpl } from "./gmail";
 export { GoogleChatGatekeeperImpl } from "./chat";
 export { ChatHookController, ChatHookDriver } from "./chat-hooks";
-import { handleChatPush, type ChatHooksEnv } from "./chat-hooks";
+export { GmailHookController, GmailHookDriver } from "./gmail-hooks";
+import { handlePubSubPush, type PushHooksEnv } from "./pubsub-push";
 
 // Vendor id = GATEKEEPER_<NAME> binding suffix (lowercased).
 const VENDOR_ID = "google";
@@ -172,7 +173,7 @@ function generateNonce(): string {
 
 
 // Declare optional environment variables here since they may be omitted from wrangler.jsonc.
-type Env = Cloudflare.Env & GoogleOAuthEnv & ChatHooksEnv & {
+type Env = Cloudflare.Env & GoogleOAuthEnv & PushHooksEnv & {
   // OAuth app credentials (wrangler secrets / .dev.vars); not in wrangler.jsonc.
   CLIENT_ID?: string;
   CLIENT_SECRET?: string;
@@ -272,7 +273,7 @@ export default {
 
       return Response.redirect(newUrl.toString(), 302);
     } else if (relPath === "/pubsub" && req.method === "POST") {
-      return handleChatPush(req, env, ctx.exports);
+      return handlePubSubPush(req, env, ctx.exports);
     } else if (relPath === "/oauth") {
       // Completion redirect.
 
@@ -387,8 +388,8 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
 
   async getTypeScriptTypes(): Promise<string> {
     return [
-      TYPES_CODE, getGoogleDocTypesCode(), SHEETS_TYPES_CODE, CALENDAR_TYPES_CODE,
-      BIGQUERY_TYPES_CODE, getDriveAgentTypesCode(), CHAT_TYPES_CODE,
+      stripTypeModulePrefix(TYPES_CODE, GMAIL_TYPES_MODULE_PREFIX), getGoogleDocTypesCode(),
+      SHEETS_TYPES_CODE, CALENDAR_TYPES_CODE, BIGQUERY_TYPES_CODE, getDriveAgentTypesCode(), CHAT_TYPES_CODE,
     ].join("\n");
   }
 }
