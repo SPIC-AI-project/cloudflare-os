@@ -5,7 +5,7 @@
 // getModelList()/resolveModel() shape so user.ts can treat it the same way, without touching that
 // file (kept separate to stay out of upstream's way).
 import { AiChatAuthorInfo } from "@gadgets/workshop-shared/api";
-import type { UserAiModelRecord } from "./user.js";
+import type { UserAiModelRecord } from "./storage-schema/user-storage.js";
 
 export interface SharedOllamaModel {
   /** Model name as `ollama list` shows it on the shared server, e.g. "muse-glimmer:latest". */
